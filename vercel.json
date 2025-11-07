@@ -24,6 +24,12 @@
       "dest": "/api/server.js"
     },
     {
+      "src": "/(.*\\.(png|jpg|jpeg|gif|mp3|wav))",
+      "headers": {
+        "Cache-Control": "public, max-age=86400"
+      }
+    },
+    {
       "src": "/(.*)",
       "dest": "/api/server.js"
     }
