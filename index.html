@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pop-Dak - Global Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            background: url('backback.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            color: white;
+            min-height: 100vh;
+            padding: 15px;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 10px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        header {
+            margin-bottom: 20px;
+            padding: 0 10px;
+            width: 100%;
+        }
+        
+        h1 {
+            font-size: clamp(2.5rem, 10vw, 4.5rem);
+            margin-bottom: 8px;
+            text-shadow: 
+                3px 3px 0 #000,
+                -1px -1px 0 #000,
+                1px -1px 0 #000,
+                -1px 1px 0 #000,
+                1px 1px 0 #000,
+                0 0 10px rgba(0, 0, 0, 0.8);
+            line-height: 1.1;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+        
+        .cat-container {
+            margin: 20px auto;
+            width: min(90vw, 500px);
+            height: min(90vw, 500px);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            user-select: none;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .cat-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 20px;
+            -webkit-user-select: none;
+            -webkit-user-drag: none;
+            user-select: none;
+        }
+        
+        .cat-image.open {
+            filter: brightness(1);
+        }
+        
+        .cat-image.closed {
+            filter: brightness(0.85);
+        }
+        
+        .preload {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .click-popup {
+            position: absolute;
+            font-size: clamp(1.5rem, 6vw, 2.5rem);
+            font-weight: bold;
+            color: #ffeb3b;
+            text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.7);
+            pointer-events: none;
+            animation: floatUp 0.8s ease-out forwards;
+            z-index: 100;
+            user-select: none;
+        }
+        
+        @keyframes floatUp {
+            0% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+            70% {
+                opacity: 0.8;
+                transform: translateY(-60px) scale(1.3);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-100px) scale(1.5);
+            }
+        }
+        
+        @keyframes clickBounce {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.15);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+        
+        .click-bounce {
+            animation: clickBounce 0.3s ease;
+        }
+        
+        .medal-svg {
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+        }
+        
+        .medal.gold .medal-svg {
+            filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.5));
+        }
+        
+        .medal.silver .medal-svg {
+            filter: drop-shadow(0 0 6px rgba(192, 192, 192, 0.5));
+        }
+        
+        .medal.bronze .medal-svg {
+            filter: drop-shadow(0 0 6px rgba(205, 127, 50, 0.5));
+        }
+        
+        .medal-small {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        
+        .medal-small .medal-svg {
+            width: 20px;
+            height: 20px;
+        }
+        
+        .leaderboard-section {
+            margin-top: auto;
+            padding-bottom: 10px;
+        }
+        
+        .leaderboard-minimized {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            border-radius: 15px;
+            padding: 15px 20px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .leaderboard-minimized:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .leaderboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+        
+        .leaderboard-top {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex: 1;
+            justify-content: space-between;
+        }
+        
+        .top-country {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            justify-content: flex-start;
+        }
+        
+        .user-stats {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+        
+        .user-flag {
+            width: 25px;
+            height: 16px;
+            border-radius: 3px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .user-clicks {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #ffeb3b;
+            transition: all 0.2s ease;
+        }
+        
+        .medal {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 5px;
+        }
+        
+        .gold {
+            color: #FFD700;
+        }
+        
+        .silver {
+            color: #C0C0C0;
+        }
+        
+        .bronze {
+            color: #CD7F32;
+        }
+        
+        .country-flag {
+            width: 30px;
+            height: 20px;
+            border-radius: 3px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .country-name {
+            font-weight: bold;
+            font-size: clamp(1rem, 4vw, 1.2rem);
+            text-align: left;
+        }
+        
+        .country-clicks {
+            font-size: clamp(1.1rem, 4vw, 1.3rem);
+            font-weight: bold;
+            color: #ffeb3b;
+        }
+        
+        .toggle-arrow {
+            font-size: 1.5rem;
+            transition: transform 0.3s ease;
+            opacity: 0.8;
+            margin-left: 15px;
+        }
+        
+        .toggle-arrow.expanded {
+            transform: rotate(180deg);
+        }
+        
+        .leaderboard-expanded {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border-radius: 15px;
+            padding: 20px 15px;
+            margin-top: 15px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .leaderboard-expanded h2 {
+            margin-bottom: 15px;
+            font-size: clamp(1.3rem, 5vw, 1.8rem);
+            color: #ffeb3b;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        .leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: clamp(0.85rem, 3vw, 1rem);
+        }
+        
+        .leaderboard-table th,
+        .leaderboard-table td {
+            padding: 12px 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .leaderboard-table th {
+            background-color: rgba(255, 255, 255, 0.15);
+            font-weight: bold;
+            font-size: clamp(0.75rem, 3vw, 0.9rem);
+            color: #ffeb3b;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        
+        .leaderboard-table tr:hover {
+            background-color: rgba(255, 255, 255, 0.08);
+        }
+        
+        .rank-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: bold;
+        }
+        
+        .current-user {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 165, 0, 0.2)) !important;
+            border-left: 3px solid #ffeb3b;
+        }
+        
+        @media (max-width: 768px) {
+            .leaderboard-top {
+                flex-direction: column;
+                gap: 10px;
+                align-items: stretch;
+            }
+            
+            .user-stats {
+                justify-content: center;
+                order: -1;
+            }
+            
+            .top-country {
+                justify-content: center;
+            }
+            
+            h1 {
+                font-size: clamp(2.2rem, 12vw, 4rem);
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .leaderboard-minimized {
+                padding: 12px 15px;
+            }
+            
+            .top-country {
+                gap: 8px;
+            }
+            
+            .country-flag {
+                width: 25px;
+                height: 16px;
+            }
+            
+            .user-flag {
+                width: 20px;
+                height: 14px;
+            }
+            
+            .leaderboard-table th,
+            .leaderboard-table td {
+                padding: 10px 6px;
+            }
+            
+            h1 {
+                font-size: clamp(2rem, 14vw, 3.5rem);
+            }
+        }
+        
+        @media (max-width: 360px) {
+            .leaderboard-minimized {
+                padding: 10px 12px;
+            }
+            
+            .country-name {
+                font-size: 0.9rem;
+            }
+            
+            .country-clicks {
+                font-size: 1rem;
+            }
+            
+            .user-clicks {
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="preload">
+        <img src="image1.png" alt="preload-open">
+        <img src="image2.png" alt="preload-closed">
+    </div>
+
+    <div class="container">
+        <div class="main-content">
+            <header>
+                <h1>Pop-Dak</h1>
+            </header>
+            
+            <div class="cat-container" id="cat-container">
+                <img src="image1.png" alt="Pop-Dak" class="cat-image open" id="cat-image">
+            </div>
+        </div>
+        
+        <div class="leaderboard-section">
+            <div class="leaderboard-minimized" id="leaderboard-minimized">
+                <div class="leaderboard-header">
+                    <div class="leaderboard-top" id="leaderboard-top">
+                    </div>
+                    <div class="toggle-arrow" id="toggle-arrow">▼</div>
+                </div>
+            </div>
+            
+            <div class="leaderboard-expanded" id="leaderboard-expanded" style="display: none;">
+                <h2>Country Leaderboard</h2>
+                <table class="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Country</th>
+                            <th>Clicks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // En Vercel las APIs están en la misma URL
+        const API_BASE_URL = window.location.origin;
+        
+        // Global variables
+        let userClicks = 0;
+        let sessionClicks = 0;
+        let totalClicks = 0;
+        let userCountry = "Unknown";
+        let userCountryCode = "unknown";
+        let userId = generateUserId();
+        let isProcessing = false;
+        let isLeaderboardExpanded = false;
+        let currentLeaderboard = [];
+        let lastClickTime = 0;
+        let clickCooldown = 50;
+        let clickBatch = [];
+        
+        // Sistema de audio
+        let audioPool = [];
+        let currentAudioIndex = 0;
+        const AUDIO_POOL_SIZE = 8;
+        
+        // DOM elements
+        const catContainer = document.getElementById('cat-container');
+        const catImage = document.getElementById('cat-image');
+        const leaderboardMinimized = document.getElementById('leaderboard-minimized');
+        const leaderboardExpanded = document.getElementById('leaderboard-expanded');
+        const leaderboardBody = document.getElementById('leaderboard-body');
+        const leaderboardTop = document.getElementById('leaderboard-top');
+        const toggleArrow = document.getElementById('toggle-arrow');
+        
+        // Image paths
+        const IMAGE_OPEN = 'image1.png';
+        const IMAGE_CLOSED = 'image2.png';
+        
+        // Inicializar el pool de audio
+        function initializeAudioPool() {
+            for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
+                const audio = new Audio('sound.mp3');
+                audio.preload = 'auto';
+                audio.volume = 0.6;
+                audioPool.push(audio);
+            }
+        }
+        
+        // Función para reproducir sonido
+        function playClickSound() {
+            try {
+                const audio = audioPool[currentAudioIndex];
+                audio.currentTime = 0;
+                
+                const playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        audio.volume = 0;
+                    });
+                }
+                
+                currentAudioIndex = (currentAudioIndex + 1) % AUDIO_POOL_SIZE;
+            } catch (error) {
+                // Silenciar errores
+            }
+        }
+        
+        // Preload images
+        function preloadImages() {
+            const openImg = new Image();
+            const closedImg = new Image();
+            openImg.src = IMAGE_OPEN;
+            closedImg.src = IMAGE_CLOSED;
+        }
+        
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', async function() {
+            initializeAudioPool();
+            preloadImages();
+            
+            await detectCountry();
+            await loadUserData();
+            await loadLeaderboard();
+            
+            setupClickEvents();
+            setupLeaderboardToggle();
+            setInterval(loadLeaderboard, 5000);
+            activateAudioOnFirstTouch();
+        });
+        
+        // Configuración del toggle del leaderboard para móviles
+        function setupLeaderboardToggle() {
+            leaderboardMinimized.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleLeaderboard();
+            });
+            
+            toggleArrow.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleLeaderboard();
+            });
+        }
+        
+        // Función para activar audio en el primer touch
+        function activateAudioOnFirstTouch() {
+            const activateAudio = function() {
+                try {
+                    const silentAudio = new Audio();
+                    silentAudio.volume = 0.001;
+                    silentAudio.play();
+                    
+                    document.removeEventListener('touchstart', activateAudio);
+                    document.removeEventListener('mousedown', activateAudio);
+                } catch (error) {
+                    // Silenciar errores
+                }
+            };
+            
+            document.addEventListener('touchstart', activateAudio, { once: true });
+            document.addEventListener('mousedown', activateAudio, { once: true });
+        }
+        
+        function setupClickEvents() {
+            let clickTimeout;
+            let isClicking = false;
+            
+            const handleClickStart = function(event) {
+                event.preventDefault();
+                
+                const now = Date.now();
+                if (now - lastClickTime < clickCooldown) return;
+                lastClickTime = now;
+                
+                // Cambio instantáneo de imagen
+                changeToClosedImage();
+                createClickPopup(event);
+                playClickSound();
+                
+                // CONTEO EN VIVO: Registrar click localmente
+                userClicks++;
+                sessionClicks++;
+                updateMinimizedLeaderboard(currentLeaderboard);
+                animateClickCounter();
+                
+                // Agregar al lote para enviar después
+                clickBatch.push({
+                    timestamp: now,
+                    userId: userId,
+                    countryCode: userCountryCode,
+                    countryName: userCountry
+                });
+                
+                isClicking = true;
+                if (clickTimeout) clearTimeout(clickTimeout);
+            };
+            
+            const handleClickEnd = function() {
+                isClicking = false;
+                changeToOpenImage();
+                
+                // Enviar clicks después de dejar de hacer click
+                clickTimeout = setTimeout(() => {
+                    if (!isClicking && clickBatch.length > 0) {
+                        sendClickBatch();
+                    }
+                }, 500);
+            };
+            
+            // Eventos para desktop
+            catContainer.addEventListener('mousedown', handleClickStart);
+            catContainer.addEventListener('mouseup', handleClickEnd);
+            catContainer.addEventListener('mouseleave', handleClickEnd);
+            
+            // Eventos para móviles
+            catContainer.addEventListener('touchstart', handleClickStart, { passive: false });
+            catContainer.addEventListener('touchend', handleClickEnd);
+            catContainer.addEventListener('touchcancel', handleClickEnd);
+            
+            // Prevenir acciones no deseadas
+            catContainer.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            catContainer.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+        }
+        
+        // Enviar lote de clicks al servidor
+        async function sendClickBatch() {
+            if (isProcessing || clickBatch.length === 0) return;
+            
+            isProcessing = true;
+            const batchToSend = [...clickBatch];
+            clickBatch = [];
+            
+            try {
+                // Enviar cada click individualmente
+                let successfulClicks = 0;
+                for (const click of batchToSend) {
+                    const response = await fetch(`${API_BASE_URL}/api/click`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            userId: click.userId,
+                            countryCode: click.countryCode,
+                            countryName: click.countryName
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        successfulClicks++;
+                        const data = await response.json();
+                        // Sincronizar con datos del servidor
+                        userClicks = data.userClicks;
+                    }
+                }
+                
+                console.log(`✅ Sent ${successfulClicks}/${batchToSend.length} clicks to server`);
+                
+                // Recargar el leaderboard para mostrar datos actualizados
+                await loadLeaderboard();
+                
+            } catch (error) {
+                console.log('Error sending clicks:', error);
+                // Si falla, volver a agregar los clicks al lote
+                clickBatch = [...batchToSend, ...clickBatch];
+            }
+            
+            isProcessing = false;
+        }
+        
+        // Cambio instantáneo de imagen
+        function changeToClosedImage() {
+            catImage.src = IMAGE_CLOSED;
+            catImage.classList.remove('open');
+            catImage.classList.add('closed');
+        }
+        
+        function changeToOpenImage() {
+            catImage.src = IMAGE_OPEN;
+            catImage.classList.remove('closed');
+            catImage.classList.add('open');
+        }
+        
+        // Animación del contador
+        function animateClickCounter() {
+            const userClicksElement = document.querySelector('.user-clicks');
+            if (userClicksElement) {
+                userClicksElement.classList.remove('click-bounce');
+                void userClicksElement.offsetWidth;
+                userClicksElement.classList.add('click-bounce');
+            }
+        }
+        
+        function generateUserId() {
+            let id = localStorage.getItem('popdak_userId');
+            if (!id) {
+                id = 'user_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('popdak_userId', id);
+            }
+            return id;
+        }
+        
+        async function detectCountry() {
+            try {
+                const response = await fetch('https://api.country.is/');
+                const data = await response.json();
+                userCountry = data.country;
+                userCountryCode = data.country.toLowerCase();
+            } catch (error) {
+                userCountry = "Unknown";
+                userCountryCode = "unknown";
+            }
+        }
+        
+        async function loadUserData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/user?userId=${userId}`);
+                const data = await response.json();
+                userClicks = data.userClicks;
+                updateMinimizedLeaderboard(currentLeaderboard);
+            } catch (error) {
+                console.log('Loading user data:', error);
+            }
+        }
+        
+        async function loadLeaderboard() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/leaderboard`);
+                const data = await response.json();
+                
+                totalClicks = data.totalClicks;
+                currentLeaderboard = data.leaderboard || [];
+                
+                updateMinimizedLeaderboard(currentLeaderboard);
+                if (isLeaderboardExpanded) {
+                    updateExpandedLeaderboard(currentLeaderboard);
+                }
+            } catch (error) {
+                console.log('Loading leaderboard:', error);
+            }
+        }
+        
+        function updateMinimizedLeaderboard(leaderboardData) {
+            if (!leaderboardData || leaderboardData.length === 0) {
+                leaderboardTop.innerHTML = '<span>No data yet</span>';
+                return;
+            }
+            
+            const topCountry = leaderboardData[0];
+            const medal = getMedal(1);
+            
+            leaderboardTop.innerHTML = `
+                <div class="top-country">
+                    <div class="medal ${medal.class}">${medal.icon}</div>
+                    <img src="https://flagcdn.com/w40/${topCountry.countryCode}.png" 
+                         alt="${topCountry.countryName}" 
+                         class="country-flag">
+                    <span class="country-name">${topCountry.countryName}</span>
+                    <span class="country-clicks">${topCountry.totalClicks.toLocaleString()}</span>
+                </div>
+                <div class="user-stats">
+                    <img src="https://flagcdn.com/w40/${userCountryCode}.png" 
+                         alt="${userCountry}" 
+                         class="user-flag">
+                    <span class="user-clicks">${userClicks.toLocaleString()}</span>
+                </div>
+            `;
+        }
+        
+        function updateExpandedLeaderboard(leaderboardData) {
+            if (!leaderboardData || leaderboardData.length === 0) {
+                leaderboardBody.innerHTML = '<tr><td colspan="3" style="text-align: center;">No data yet</td></tr>';
+                return;
+            }
+            
+            leaderboardBody.innerHTML = '';
+            
+            leaderboardData.forEach((item, index) => {
+                const row = document.createElement('tr');
+                const medal = getMedal(index + 1);
+                const isCurrentUser = item.countryName === userCountry;
+                
+                if (isCurrentUser) {
+                    row.classList.add('current-user');
+                }
+                
+                const rankCell = document.createElement('td');
+                rankCell.className = 'rank-cell';
+                rankCell.innerHTML = `
+                    <div class="medal-small ${medal.class}">${medal.icon}</div>
+                    <span>${index + 1}</span>
+                `;
+                row.appendChild(rankCell);
+                
+                const countryCell = document.createElement('td');
+                countryCell.innerHTML = `
+                    <img src="https://flagcdn.com/w40/${item.countryCode}.png" 
+                         alt="${item.countryName}" 
+                         class="country-flag"
+                         style="vertical-align: middle; margin-right: 8px;">
+                    ${item.countryName}
+                `;
+                row.appendChild(countryCell);
+                
+                const clicksCell = document.createElement('td');
+                clicksCell.textContent = item.totalClicks.toLocaleString();
+                row.appendChild(clicksCell);
+                
+                leaderboardBody.appendChild(row);
+            });
+        }
+        
+        function getMedal(rank) {
+            switch(rank) {
+                case 1:
+                    return { 
+                        icon: '<svg width="24" height="24" viewBox="0 0 24 24" class="medal-svg"><circle cx="12" cy="12" r="10" fill="#FFD700" stroke="#FFA500" stroke-width="1"/><circle cx="12" cy="12" r="6" fill="#FFF" opacity="0.3"/><text x="12" y="16" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">1</text></svg>',
+                        class: 'gold' 
+                    };
+                case 2:
+                    return { 
+                        icon: '<svg width="24" height="24" viewBox="0 0 24 24" class="medal-svg"><circle cx="12" cy="12" r="10" fill="#C0C0C0" stroke="#A0A0A0" stroke-width="1"/><circle cx="12" cy="12" r="6" fill="#FFF" opacity="0.3"/><text x="12" y="16" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">2</text></svg>',
+                        class: 'silver' 
+                    };
+                case 3:
+                    return { 
+                        icon: '<svg width="24" height="24" viewBox="0 0 24 24" class="medal-svg"><circle cx="12" cy="12" r="10" fill="#CD7F32" stroke="#8B4513" stroke-width="1"/><circle cx="12" cy="12" r="6" fill="#FFF" opacity="0.3"/><text x="12" y="16" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">3</text></svg>',
+                        class: 'bronze' 
+                    };
+                default:
+                    return { 
+                        icon: `<svg width="24" height="24" viewBox="0 0 24 24" class="medal-svg"><circle cx="12" cy="12" r="10" fill="#666" stroke="#444" stroke-width="1"/><circle cx="12" cy="12" r="6" fill="#FFF" opacity="0.3"/><text x="12" y="16" text-anchor="middle" fill="#FFF" font-size="10" font-weight="bold">${rank}</text></svg>`,
+                        class: '' 
+                    };
+            }
+        }
+        
+        function toggleLeaderboard() {
+            isLeaderboardExpanded = !isLeaderboardExpanded;
+            
+            if (isLeaderboardExpanded) {
+                leaderboardExpanded.style.display = 'block';
+                toggleArrow.classList.add('expanded');
+                updateExpandedLeaderboard(currentLeaderboard);
+            } else {
+                leaderboardExpanded.style.display = 'none';
+                toggleArrow.classList.remove('expanded');
+            }
+        }
+        
+        function createClickPopup(event) {
+            const popup = document.createElement('div');
+            popup.className = 'click-popup';
+            popup.textContent = '+1';
+            
+            const rect = catContainer.getBoundingClientRect();
+            let x, y;
+            
+            if (event.touches && event.touches[0]) {
+                x = event.touches[0].clientX - rect.left;
+                y = event.touches[0].clientY - rect.top;
+            } else if (event.clientX && event.clientY) {
+                x = event.clientX - rect.left;
+                y = event.clientY - rect.top;
+            } else {
+                x = rect.width / 2;
+                y = rect.height / 2;
+            }
+            
+            x = Math.max(20, Math.min(rect.width - 20, x));
+            y = Math.max(20, Math.min(rect.height - 20, y));
+            
+            popup.style.left = x + 'px';
+            popup.style.top = y + 'px';
+            
+            catContainer.appendChild(popup);
+            
+            setTimeout(() => {
+                if (popup.parentNode) {
+                    popup.remove();
+                }
+            }, 800);
+        }
+        
+        // Prevenir acciones no deseadas
+        document.addEventListener('touchstart', function(e) {
+            if (e.touches.length > 1) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        document.addEventListener('contextmenu', function(e) {
+            if (e.target === catImage || e.target === catContainer) {
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+</html>
