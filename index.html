@@ -473,14 +473,14 @@
         </div>
     </div>
 
-    <script>
-        // En Vercel las APIs están en la misma URL
+        <script>
+        // Auto-detect API URL
         const API_BASE_URL = window.location.origin;
         
         // Global variables
         let userClicks = 0;
-        let sessionClicks = 0;
-        let totalClicks = 0;
+        let serverConfirmedClicks = 0; // Clicks confirmados por el servidor
+        let pendingClicks = 0; // Clicks pendientes de confirmar
         let userCountry = "Unknown";
         let userCountryCode = "unknown";
         let userId = generateUserId();
@@ -489,7 +489,12 @@
         let currentLeaderboard = [];
         let lastClickTime = 0;
         let clickCooldown = 50;
-        let clickBatch = [];
+        
+        // Sistema de cola de clicks
+        let clickQueue = [];
+        let isSending = false;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
         
         // Sistema de audio
         let audioPool = [];
@@ -506,18 +511,18 @@
         const toggleArrow = document.getElementById('toggle-arrow');
         
         // Image paths
-        const IMAGE_OPEN = 'image1.png';
-        const IMAGE_CLOSED = 'image2.png';
+        const IMAGE_OPEN = '/image1.png';
+        const IMAGE_CLOSED = '/image2.png';
         
-   // En initializeAudioPool:
-function initializeAudioPool() {
-    for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
-        const audio = new Audio('sound.mp3'); // Añade /
-        audio.preload = 'auto';
-        audio.volume = 0.6;
-        audioPool.push(audio);
-    }
-}
+        // Inicializar el pool de audio
+        function initializeAudioPool() {
+            for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
+                const audio = new Audio('/sound.mp3');
+                audio.preload = 'auto';
+                audio.volume = 0.6;
+                audioPool.push(audio);
+            }
+        }
         
         // Función para reproducir sonido
         function playClickSound() {
@@ -552,16 +557,23 @@ function initializeAudioPool() {
             preloadImages();
             
             await detectCountry();
-            await loadUserData();
+            await loadUserData(); // Cargar clicks existentes del usuario
             await loadLeaderboard();
             
             setupClickEvents();
             setupLeaderboardToggle();
-            setInterval(loadLeaderboard, 5000);
+            
+            // Procesar cola cada segundo
+            setInterval(processClickQueue, 1000);
+            // Actualizar leaderboard cada 3 segundos
+            setInterval(loadLeaderboard, 3000);
+            
             activateAudioOnFirstTouch();
+            
+            console.log(`🎮 Usuario: ${userId}, Clicks iniciales: ${userClicks}`);
         });
         
-        // Configuración del toggle del leaderboard para móviles
+        // Configuración del toggle del leaderboard
         function setupLeaderboardToggle() {
             leaderboardMinimized.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -609,19 +621,21 @@ function initializeAudioPool() {
                 createClickPopup(event);
                 playClickSound();
                 
-                // CONTEO EN VIVO: Registrar click localmente
+                // CONTEO LOCAL INMEDIATO
                 userClicks++;
-                sessionClicks++;
-                updateMinimizedLeaderboard(currentLeaderboard);
-                animateClickCounter();
+                pendingClicks++;
                 
-                // Agregar al lote para enviar después
-                clickBatch.push({
+                // Agregar a la cola para enviar al servidor
+                clickQueue.push({
                     timestamp: now,
                     userId: userId,
                     countryCode: userCountryCode,
                     countryName: userCountry
                 });
+                
+                // Actualizar UI inmediatamente
+                updateMinimizedLeaderboard(currentLeaderboard);
+                animateClickCounter();
                 
                 isClicking = true;
                 if (clickTimeout) clearTimeout(clickTimeout);
@@ -631,12 +645,12 @@ function initializeAudioPool() {
                 isClicking = false;
                 changeToOpenImage();
                 
-                // Enviar clicks después de dejar de hacer click
+                // Procesar cola después de dejar de hacer click
                 clickTimeout = setTimeout(() => {
-                    if (!isClicking && clickBatch.length > 0) {
-                        sendClickBatch();
+                    if (!isClicking) {
+                        processClickQueue();
                     }
-                }, 500);
+                }, 300);
             };
             
             // Eventos para desktop
@@ -661,50 +675,76 @@ function initializeAudioPool() {
             });
         }
         
-        // Enviar lote de clicks al servidor
-        async function sendClickBatch() {
-            if (isProcessing || clickBatch.length === 0) return;
+        // Procesar cola de clicks - SISTEMA MEJORADO
+        async function processClickQueue() {
+            if (isSending || clickQueue.length === 0) return;
             
-            isProcessing = true;
-            const batchToSend = [...clickBatch];
-            clickBatch = [];
+            isSending = true;
+            const batchToSend = [...clickQueue];
+            
+            console.log(`📤 Enviando lote de ${batchToSend.length} clicks...`);
             
             try {
-                // Enviar cada click individualmente
-                let successfulClicks = 0;
-                for (const click of batchToSend) {
-                    const response = await fetch(`${API_BASE_URL}/api/click`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            userId: click.userId,
-                            countryCode: click.countryCode,
-                            countryName: click.countryName
-                        })
-                    });
+                // Enviar todos los clicks en una sola solicitud
+                const response = await fetch(`${API_BASE_URL}/api/clicks`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId: userId,
+                        countryCode: userCountryCode,
+                        countryName: userCountry,
+                        clicks: batchToSend.length
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
                     
-                    if (response.ok) {
-                        successfulClicks++;
-                        const data = await response.json();
-                        // Sincronizar con datos del servidor
-                        userClicks = data.userClicks;
-                    }
+                    // Actualizar con la respuesta del servidor
+                    userClicks = data.userClicks;
+                    serverConfirmedClicks = data.userClicks;
+                    pendingClicks = 0;
+                    
+                    // Limpiar cola procesada
+                    clickQueue = [];
+                    retryCount = 0;
+                    
+                    console.log(`✅ Clicks confirmados: ${data.userClicks} (${batchToSend.length} nuevos)`);
+                    
+                    // Actualizar UI
+                    updateMinimizedLeaderboard(currentLeaderboard);
+                    
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
                 }
                 
-                console.log(`✅ Sent ${successfulClicks}/${batchToSend.length} clicks to server`);
-                
-                // Recargar el leaderboard para mostrar datos actualizados
-                await loadLeaderboard();
-                
             } catch (error) {
-                console.log('Error sending clicks:', error);
-                // Si falla, volver a agregar los clicks al lote
-                clickBatch = [...batchToSend, ...clickBatch];
+                console.log(`❌ Error enviando clicks: ${error.message}`);
+                
+                // Reintentar
+                retryCount++;
+                if (retryCount <= MAX_RETRIES) {
+                    console.log(`🔄 Reintentando... (${retryCount}/${MAX_RETRIES})`);
+                    setTimeout(() => {
+                        isSending = false;
+                        processClickQueue();
+                    }, 1000 * retryCount);
+                } else {
+                    // Si falla después de varios intentos, mantener clicks en cola
+                    console.log('⚠️ Clicks mantenidos en cola local');
+                    isSending = false;
+                }
+                return;
             }
             
-            isProcessing = false;
+            isSending = false;
+            
+            // Procesar siguiente lote si hay más clicks
+            if (clickQueue.length > 0) {
+                setTimeout(processClickQueue, 100);
+            }
         }
         
         // Cambio instantáneo de imagen
@@ -733,7 +773,7 @@ function initializeAudioPool() {
         function generateUserId() {
             let id = localStorage.getItem('popdak_userId');
             if (!id) {
-                id = 'user_' + Math.random().toString(36).substr(2, 9);
+                id = 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
                 localStorage.setItem('popdak_userId', id);
             }
             return id;
@@ -745,37 +785,41 @@ function initializeAudioPool() {
                 const data = await response.json();
                 userCountry = data.country;
                 userCountryCode = data.country.toLowerCase();
+                console.log(`🌍 País detectado: ${userCountry} (${userCountryCode})`);
             } catch (error) {
                 userCountry = "Unknown";
                 userCountryCode = "unknown";
+                console.log('🌍 No se pudo detectar el país');
             }
         }
         
         async function loadUserData() {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/user?userId=${userId}`);
-                const data = await response.json();
-                userClicks = data.userClicks;
-                updateMinimizedLeaderboard(currentLeaderboard);
+                const response = await fetch(`${API_BASE_URL}/api/user/${userId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    userClicks = data.userClicks;
+                    serverConfirmedClicks = data.userClicks;
+                    console.log(`📊 Clicks del usuario cargados: ${userClicks}`);
+                }
             } catch (error) {
-                console.log('Loading user data:', error);
+                console.log('❌ Error cargando datos del usuario:', error);
             }
         }
         
         async function loadLeaderboard() {
             try {
                 const response = await fetch(`${API_BASE_URL}/api/leaderboard`);
-                const data = await response.json();
-                
-                totalClicks = data.totalClicks;
-                currentLeaderboard = data.leaderboard || [];
-                
-                updateMinimizedLeaderboard(currentLeaderboard);
-                if (isLeaderboardExpanded) {
-                    updateExpandedLeaderboard(currentLeaderboard);
+                if (response.ok) {
+                    const data = await response.json();
+                    currentLeaderboard = data.leaderboard || [];
+                    updateMinimizedLeaderboard(currentLeaderboard);
+                    if (isLeaderboardExpanded) {
+                        updateExpandedLeaderboard(currentLeaderboard);
+                    }
                 }
             } catch (error) {
-                console.log('Loading leaderboard:', error);
+                console.log('❌ Error cargando leaderboard:', error);
             }
         }
         
@@ -787,6 +831,10 @@ function initializeAudioPool() {
             
             const topCountry = leaderboardData[0];
             const medal = getMedal(1);
+            
+            // Mostrar clicks locales + indicador de pendientes si hay
+            const displayClicks = userClicks.toLocaleString();
+            const pendingText = pendingClicks > 0 ? ` (+${pendingClicks})` : '';
             
             leaderboardTop.innerHTML = `
                 <div class="top-country">
@@ -801,7 +849,7 @@ function initializeAudioPool() {
                     <img src="https://flagcdn.com/w40/${userCountryCode}.png" 
                          alt="${userCountry}" 
                          class="user-flag">
-                    <span class="user-clicks">${userClicks.toLocaleString()}</span>
+                    <span class="user-clicks">${displayClicks}${pendingText}</span>
                 </div>
             `;
         }
@@ -817,7 +865,7 @@ function initializeAudioPool() {
             leaderboardData.forEach((item, index) => {
                 const row = document.createElement('tr');
                 const medal = getMedal(index + 1);
-                const isCurrentUser = item.countryName === userCountry;
+                const isCurrentUser = item.countryCode === userCountryCode;
                 
                 if (isCurrentUser) {
                     row.classList.add('current-user');
@@ -838,6 +886,7 @@ function initializeAudioPool() {
                          class="country-flag"
                          style="vertical-align: middle; margin-right: 8px;">
                     ${item.countryName}
+                    ${isCurrentUser ? ' (You)' : ''}
                 `;
                 row.appendChild(countryCell);
                 
@@ -931,6 +980,20 @@ function initializeAudioPool() {
         document.addEventListener('contextmenu', function(e) {
             if (e.target === catImage || e.target === catContainer) {
                 e.preventDefault();
+            }
+        });
+        
+        // Sincronizar antes de que la página se cierre
+        window.addEventListener('beforeunload', function() {
+            if (clickQueue.length > 0 && navigator.sendBeacon) {
+                const data = JSON.stringify({
+                    userId: userId,
+                    countryCode: userCountryCode,
+                    countryName: userCountry,
+                    clicks: clickQueue.length
+                });
+                
+                navigator.sendBeacon(`${API_BASE_URL}/api/clicks`, data);
             }
         });
     </script>
