@@ -89,6 +89,9 @@
             -webkit-user-select: none;
             -webkit-user-drag: none;
             user-select: none;
+            transition: filter 0.05s ease-out;
+            transform: translateZ(0);
+            will-change: filter;
         }
         
         .cat-image.open {
@@ -96,7 +99,7 @@
         }
         
         .cat-image.closed {
-            filter: brightness(0.85);
+            filter: brightness(0.7);
         }
         
         .preload {
@@ -137,7 +140,7 @@
                 transform: scale(1);
             }
             50% {
-                transform: scale(1.15);
+                transform: scale(1.08);
             }
             100% {
                 transform: scale(1);
@@ -145,7 +148,7 @@
         }
         
         .click-bounce {
-            animation: clickBounce 0.3s ease;
+            animation: clickBounce 0.15s ease;
         }
         
         .medal-svg {
@@ -476,10 +479,8 @@
     </div>
 
     <script>
-        // Auto-detect API URL
         const API_BASE_URL = window.location.origin;
         
-        // Global variables
         let userClicks = 0;
         let serverConfirmedClicks = 0;
         let pendingClicks = 0;
@@ -490,20 +491,17 @@
         let isLeaderboardExpanded = false;
         let currentLeaderboard = [];
         let lastClickTime = 0;
-        let clickCooldown = 50;
+        const CLICK_THROTTLE = 8;
         
-        // Sistema de cola de clicks
         let clickQueue = [];
         let isSending = false;
         let retryCount = 0;
-        const MAX_RETRIES = 5;
+        const MAX_RETRIES = 3;
         
-        // Sistema de audio
         let audioPool = [];
         let currentAudioIndex = 0;
         const AUDIO_POOL_SIZE = 8;
         
-        // DOM elements
         const catContainer = document.getElementById('cat-container');
         const catImage = document.getElementById('cat-image');
         const leaderboardMinimized = document.getElementById('leaderboard-minimized');
@@ -512,11 +510,9 @@
         const leaderboardTop = document.getElementById('leaderboard-top');
         const toggleArrow = document.getElementById('toggle-arrow');
         
-        // Image paths
         const IMAGE_OPEN = '/image1.png';
         const IMAGE_CLOSED = '/image2.png';
         
-        // Inicializar el pool de audio
         function initializeAudioPool() {
             for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
                 const audio = new Audio('/sound.mp3');
@@ -526,7 +522,6 @@
             }
         }
         
-        // Función para reproducir sonido
         function playClickSound() {
             try {
                 const audio = audioPool[currentAudioIndex];
@@ -541,11 +536,9 @@
                 
                 currentAudioIndex = (currentAudioIndex + 1) % AUDIO_POOL_SIZE;
             } catch (error) {
-                // Silenciar errores
             }
         }
         
-        // Preload images
         function preloadImages() {
             const openImg = new Image();
             const closedImg = new Image();
@@ -553,7 +546,6 @@
             closedImg.src = IMAGE_CLOSED;
         }
         
-        // Initialize app
         document.addEventListener('DOMContentLoaded', async function() {
             initializeAudioPool();
             preloadImages();
@@ -565,68 +557,52 @@
             setupClickEvents();
             setupLeaderboardToggle();
             
-            // Procesar cola más frecuentemente
             setInterval(processClickQueue, 500);
-            // Actualizar leaderboard con los datos del usuario
             setInterval(loadLeaderboard, 2000);
             
             activateAudioOnFirstTouch();
-            
-            console.log(`🎮 Usuario: ${userId}, Clicks iniciales: ${userClicks}, País: ${userCountry}`);
         });
         
-        // DETECCIÓN DE PAÍS MEJORADA CON API DE RESPALDO
         async function detectCountry() {
             try {
-                // Intentar con la API principal
-                console.log('🌍 Detectando país...');
                 const response1 = await fetch('https://api.country.is/');
                 if (response1.ok) {
                     const data = await response1.json();
                     if (data.country && data.country.length === 2) {
                         userCountry = data.country;
                         userCountryCode = data.country.toLowerCase();
-                        console.log(`🌍 País detectado (api.country.is): ${userCountry} (${userCountryCode})`);
                         return;
                     }
                 }
                 
-                // Intentar con API de respaldo 1
-                console.log('🌍 Intentando API de respaldo 1...');
                 const response2 = await fetch('https://ipapi.co/country/');
                 if (response2.ok) {
                     const countryCode = await response2.text();
                     if (countryCode && countryCode.length === 2) {
                         userCountry = countryCode;
                         userCountryCode = countryCode.toLowerCase();
-                        console.log(`🌍 País detectado (ipapi.co): ${userCountry} (${userCountryCode})`);
                         return;
                     }
                 }
                 
-                // Intentar con API de respaldo 2
-                console.log('🌍 Intentando API de respaldo 2...');
                 const response3 = await fetch('https://ipinfo.io/country?token=test');
                 if (response3.ok) {
                     const countryCode = await response3.text();
                     if (countryCode && countryCode.length === 2) {
                         userCountry = countryCode;
                         userCountryCode = countryCode.toLowerCase();
-                        console.log(`🌍 País detectado (ipinfo.io): ${userCountry} (${userCountryCode})`);
                         return;
                     }
                 }
                 
-                throw new Error('No se pudo detectar el país con ninguna API');
+                throw new Error('No se pudo detectar el país');
                 
             } catch (error) {
                 userCountry = "International";
                 userCountryCode = "int";
-                console.log('🌍 No se pudo detectar el país, usando: International');
             }
         }
         
-        // Configuración del toggle del leaderboard
         function setupLeaderboardToggle() {
             leaderboardMinimized.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -639,7 +615,6 @@
             });
         }
         
-        // Función para activar audio en el primer touch
         function activateAudioOnFirstTouch() {
             const activateAudio = function() {
                 try {
@@ -650,7 +625,6 @@
                     document.removeEventListener('touchstart', activateAudio);
                     document.removeEventListener('mousedown', activateAudio);
                 } catch (error) {
-                    // Silenciar errores
                 }
             };
             
@@ -659,69 +633,60 @@
         }
         
         function setupClickEvents() {
-            let clickTimeout;
             let isClicking = false;
             
             const handleClickStart = function(event) {
                 event.preventDefault();
                 
-                const now = Date.now();
-                if (now - lastClickTime < clickCooldown) return;
+                const now = performance.now();
+                if (now - lastClickTime < CLICK_THROTTLE) return;
                 lastClickTime = now;
                 
-                // Cambio instantáneo de imagen
-                changeToClosedImage();
+                catImage.src = IMAGE_CLOSED;
+                catImage.classList.remove('open');
+                catImage.classList.add('closed');
+                
                 createClickPopup(event);
                 playClickSound();
                 
-                // CONTEO LOCAL INMEDIATO
                 userClicks++;
-                pendingClicks++;
+                updateMinimizedLeaderboard(currentLeaderboard);
                 
-                // Agregar a la cola para enviar al servidor
                 clickQueue.push({
-                    timestamp: now,
+                    timestamp: Date.now(),
                     userId: userId,
                     countryCode: userCountryCode,
                     countryName: userCountry
                 });
                 
-                // Actualizar UI inmediatamente
-                updateMinimizedLeaderboard(currentLeaderboard);
-                animateClickCounter();
-                
-                // Procesar cola inmediatamente si hay muchos clicks pendientes
-                if (clickQueue.length >= 10) {
+                if (!isSending) {
                     processClickQueue();
                 }
                 
                 isClicking = true;
-                if (clickTimeout) clearTimeout(clickTimeout);
             };
             
             const handleClickEnd = function() {
-                isClicking = false;
-                changeToOpenImage();
+                if (!isClicking) return;
                 
-                // Procesar cola inmediatamente al terminar de hacer click
-                clickTimeout = setTimeout(() => {
-                    if (!isClicking && clickQueue.length > 0) {
-                        processClickQueue();
-                    }
-                }, 200);
+                isClicking = false;
+                catImage.src = IMAGE_OPEN;
+                catImage.classList.remove('closed');
+                catImage.classList.add('open');
+                
+                if (clickQueue.length > 0 && !isSending) {
+                    processClickQueue();
+                }
             };
             
-            // Eventos para desktop
             catContainer.addEventListener('mousedown', handleClickStart);
             catContainer.addEventListener('mouseup', handleClickEnd);
             catContainer.addEventListener('mouseleave', handleClickEnd);
             
-            // Eventos para móviles
             catContainer.addEventListener('touchstart', handleClickStart, { passive: false });
             catContainer.addEventListener('touchend', handleClickEnd);
             catContainer.addEventListener('touchcancel', handleClickEnd);
             
-            // Prevenir acciones no deseadas
             catContainer.addEventListener('contextmenu', function(e) {
                 e.preventDefault();
                 return false;
@@ -733,73 +698,45 @@
             });
         }
         
-        // Procesar cola de clicks - SISTEMA MEJORADO
         async function processClickQueue() {
             if (isSending || clickQueue.length === 0) return;
             
             isSending = true;
-            const batchToSend = [...clickQueue];
-            const clicksCount = batchToSend.length;
             
-            console.log(`📤 Enviando lote de ${clicksCount} clicks...`);
+            const clicksToProcess = Math.min(clickQueue.length, 2);
+            const batchToSend = clickQueue.slice(0, clicksToProcess);
             
             try {
                 const response = await fetch(`${API_BASE_URL}/api/clicks`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         userId: userId,
                         countryCode: userCountryCode,
                         countryName: userCountry,
-                        clicks: clicksCount,
+                        clicks: clicksToProcess,
                         currentTotal: userClicks
                     })
                 });
                 
                 if (response.ok) {
                     const data = await response.json();
-                    
-                    // ACTUALIZACIÓN CRÍTICA: Sincronizar con el servidor
                     serverConfirmedClicks = data.userClicks;
-                    
-                    // Verificar consistencia
-                    if (serverConfirmedClicks < userClicks) {
-                        console.warn(`⚠️ Discrepancia: Local ${userClicks} vs Servidor ${serverConfirmedClicks}`);
-                        // Forzar sincronización con el servidor
-                        userClicks = serverConfirmedClicks;
-                    }
-                    
-                    pendingClicks = Math.max(0, pendingClicks - clicksCount);
-                    
-                    // Limpiar cola procesada
-                    clickQueue = clickQueue.slice(clicksCount);
+                    clickQueue = clickQueue.slice(clicksToProcess);
                     retryCount = 0;
-                    
-                    console.log(`✅ ${clicksCount} clicks confirmados. Total servidor: ${serverConfirmedClicks}`);
-                    
-                    // Recargar leaderboard con datos actualizados
-                    await loadLeaderboard();
-                    
+                    loadLeaderboard();
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
                 
             } catch (error) {
-                console.log(`❌ Error enviando clicks: ${error.message}`);
-                
-                // Reintentar más agresivamente
                 retryCount++;
                 if (retryCount <= MAX_RETRIES) {
-                    const delay = 500 * retryCount;
-                    console.log(`🔄 Reintentando en ${delay}ms... (${retryCount}/${MAX_RETRIES})`);
                     setTimeout(() => {
                         isSending = false;
                         processClickQueue();
-                    }, delay);
+                    }, 50);
                 } else {
-                    console.log('⚠️ Máximo de reintentos alcanzado. Clicks en cola:', clickQueue.length);
                     isSending = false;
                 }
                 return;
@@ -807,32 +744,8 @@
             
             isSending = false;
             
-            // Procesar siguiente lote inmediatamente si hay más
             if (clickQueue.length > 0) {
-                setTimeout(processClickQueue, 100);
-            }
-        }
-        
-        // Cambio instantáneo de imagen
-        function changeToClosedImage() {
-            catImage.src = IMAGE_CLOSED;
-            catImage.classList.remove('open');
-            catImage.classList.add('closed');
-        }
-        
-        function changeToOpenImage() {
-            catImage.src = IMAGE_OPEN;
-            catImage.classList.remove('closed');
-            catImage.classList.add('open');
-        }
-        
-        // Animación del contador
-        function animateClickCounter() {
-            const userClicksElement = document.querySelector('.user-clicks');
-            if (userClicksElement) {
-                userClicksElement.classList.remove('click-bounce');
-                void userClicksElement.offsetWidth;
-                userClicksElement.classList.add('click-bounce');
+                setTimeout(processClickQueue, 0);
             }
         }
         
@@ -852,10 +765,8 @@
                     const data = await response.json();
                     userClicks = data.userClicks;
                     serverConfirmedClicks = data.userClicks;
-                    console.log(`📊 Clicks del usuario cargados: ${userClicks}`);
                 }
             } catch (error) {
-                console.log('❌ Error cargando datos del usuario:', error);
             }
         }
         
@@ -866,15 +777,9 @@
                     const data = await response.json();
                     currentLeaderboard = data.leaderboard || [];
                     
-                    // ACTUALIZACIÓN IMPORTANTE: Buscar nuestro país en el leaderboard
                     const myCountryInLeaderboard = currentLeaderboard.find(country => 
                         country.countryCode === userCountryCode
                     );
-                    
-                    // Si nuestro país está en el leaderboard, usar esos datos
-                    if (myCountryInLeaderboard) {
-                        console.log(`🎯 Nuestro país en leaderboard: ${myCountryInLeaderboard.totalClicks} clicks`);
-                    }
                     
                     updateMinimizedLeaderboard(currentLeaderboard);
                     if (isLeaderboardExpanded) {
@@ -882,7 +787,6 @@
                     }
                 }
             } catch (error) {
-                console.log('❌ Error cargando leaderboard:', error);
             }
         }
         
@@ -895,20 +799,16 @@
             const topCountry = leaderboardData[0];
             const medal = getMedal(1);
             
-            // Buscar nuestro país en el leaderboard para mostrar datos consistentes
             const myCountryData = leaderboardData.find(country => 
                 country.countryCode === userCountryCode
             );
             
-            // Si encontramos nuestro país, usar los datos del servidor
             const displayClicks = myCountryData ? myCountryData.totalClicks : userClicks;
             
-            // Bandera para el país top - con manejo de error
             const topCountryFlag = topCountry.countryCode !== 'int' ? 
                 `https://flagcdn.com/w40/${topCountry.countryCode}.png` : 
                 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCA0MCAyMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjIwIiBmaWxsPSIjMDA3N0MzIi8+CjxjaXJjbGUgY3g9IjIwIiBjeT0iMTAiIHI9IjYiIGZpbGw9IiNGRkYiLz4KPHBhdGggZD0iTTE0IDEwIEwyNiAxME0yMCA0IEwyMCAxNiIgc3Ryb2tlPSIjMDA3N0MzIiBzdHJva2Utd2lkdGg9IjEuNSIvPgo8L3N2Zz4K';
             
-            // Bandera para el usuario - con manejo de error
             const userFlag = userCountryCode !== 'int' ? 
                 `https://flagcdn.com/w40/${userCountryCode}.png` : 
                 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCA0MCAyMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjIwIiBmaWxsPSIjMDA3N0MzIi8+CjxjaXJjbGUgY3g9IjIwIiBjeT0iMTAiIHI9IjYiIGZpbGw9IiNGRkYiLz4KPHBhdGggZD0iTTE0IDEwIEwyNiAxME0yMCA0IEwyMCAxNiIgc3Ryb2tlPSIjMDA3N0MzIiBzdHJva2Utd2lkdGg9IjEuNSIvPgo8L3N2Zz4K';
@@ -958,7 +858,6 @@
                 `;
                 row.appendChild(rankCell);
                 
-                // Bandera con manejo de error
                 const countryFlag = item.countryCode !== 'int' ? 
                     `https://flagcdn.com/w40/${item.countryCode}.png` : 
                     'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCA0MCAyMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjIwIiBmaWxsPSIjMDA3N0MzIi8+CjxjaXJjbGUgY3g9IjIwIiBjeT0iMTAiIHI9IjYiIGZpbGw9IiNGRkYiLz4KPHBhdGggZD0iTTE0IDEwIEwyNiAxME0yMCA0IEwyMCAxNiIgc3Ryb2tlPSIjMDA3N0MzIiBzdHJva2Utd2lkdGg9IjEuNSIvPgo8L3N2Zz4K';
@@ -1055,7 +954,6 @@
             }, 800);
         }
         
-        // Sincronizar antes de que la página se cierre
         window.addEventListener('beforeunload', function() {
             if (clickQueue.length > 0 && navigator.sendBeacon) {
                 const data = JSON.stringify({
