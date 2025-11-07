@@ -481,27 +481,32 @@
     <script>
         const API_BASE_URL = window.location.origin;
         
+        // Variables mejoradas para mayor precisión
         let userClicks = 0;
         let serverConfirmedClicks = 0;
         let pendingClicks = 0;
         let userCountry = "International";
         let userCountryCode = "int";
         let userId = generateUserId();
-        let isProcessing = false;
         let isLeaderboardExpanded = false;
         let currentLeaderboard = [];
-        let lastClickTime = 0;
-        const CLICK_THROTTLE = 8;
         
+        // Sistema mejorado de cola de clicks
         let clickQueue = [];
         let isSending = false;
         let retryCount = 0;
         const MAX_RETRIES = 3;
         
+        // Sistema de audio mejorado
         let audioPool = [];
         let currentAudioIndex = 0;
         const AUDIO_POOL_SIZE = 8;
         
+        // Variables para control de imagen
+        let isImageOpen = true;
+        let imageChangeTimeout = null;
+        
+        // Referencias DOM
         const catContainer = document.getElementById('cat-container');
         const catImage = document.getElementById('cat-image');
         const leaderboardMinimized = document.getElementById('leaderboard-minimized');
@@ -513,6 +518,7 @@
         const IMAGE_OPEN = '/image1.png';
         const IMAGE_CLOSED = '/image2.png';
         
+        // Inicializar pool de audio
         function initializeAudioPool() {
             for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
                 const audio = new Audio('/sound.mp3');
@@ -522,6 +528,7 @@
             }
         }
         
+        // Reproducir sonido de click
         function playClickSound() {
             try {
                 const audio = audioPool[currentAudioIndex];
@@ -536,9 +543,11 @@
                 
                 currentAudioIndex = (currentAudioIndex + 1) % AUDIO_POOL_SIZE;
             } catch (error) {
+                // Silenciar errores de audio
             }
         }
         
+        // Precargar imágenes
         function preloadImages() {
             const openImg = new Image();
             const closedImg = new Image();
@@ -546,6 +555,7 @@
             closedImg.src = IMAGE_CLOSED;
         }
         
+        // Inicializar aplicación
         document.addEventListener('DOMContentLoaded', async function() {
             initializeAudioPool();
             preloadImages();
@@ -557,12 +567,14 @@
             setupClickEvents();
             setupLeaderboardToggle();
             
-            setInterval(processClickQueue, 500);
+            // Procesar cola de clicks más frecuentemente
+            setInterval(processClickQueue, 100);
             setInterval(loadLeaderboard, 2000);
             
             activateAudioOnFirstTouch();
         });
         
+        // Detectar país del usuario
         async function detectCountry() {
             try {
                 const response1 = await fetch('https://api.country.is/');
@@ -603,6 +615,7 @@
             }
         }
         
+        // Configurar toggle del leaderboard
         function setupLeaderboardToggle() {
             leaderboardMinimized.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -615,6 +628,7 @@
             });
         }
         
+        // Activar audio en primer toque
         function activateAudioOnFirstTouch() {
             const activateAudio = function() {
                 try {
@@ -625,6 +639,7 @@
                     document.removeEventListener('touchstart', activateAudio);
                     document.removeEventListener('mousedown', activateAudio);
                 } catch (error) {
+                    // Silenciar errores
                 }
             };
             
@@ -632,61 +647,72 @@
             document.addEventListener('mousedown', activateAudio, { once: true });
         }
         
+        // Configurar eventos de click mejorados
         function setupClickEvents() {
-            let isClicking = false;
+            // Usar requestAnimationFrame para máxima sensibilidad
+            let rafId = null;
             
-            const handleClickStart = function(event) {
+            const handleClick = function(event) {
                 event.preventDefault();
                 
-                const now = performance.now();
-                if (now - lastClickTime < CLICK_THROTTLE) return;
-                lastClickTime = now;
+                // Cancelar cualquier animación pendiente
+                if (rafId) {
+                    cancelAnimationFrame(rafId);
+                }
                 
-                catImage.src = IMAGE_CLOSED;
-                catImage.classList.remove('open');
-                catImage.classList.add('closed');
-                
-                createClickPopup(event);
-                playClickSound();
-                
-                userClicks++;
-                updateMinimizedLeaderboard(currentLeaderboard);
-                
-                clickQueue.push({
-                    timestamp: Date.now(),
-                    userId: userId,
-                    countryCode: userCountryCode,
-                    countryName: userCountry
+                // Usar requestAnimationFrame para máxima sensibilidad
+                rafId = requestAnimationFrame(() => {
+                    // Cambiar imagen inmediatamente
+                    if (isImageOpen) {
+                        catImage.src = IMAGE_CLOSED;
+                        catImage.classList.remove('open');
+                        catImage.classList.add('closed');
+                        isImageOpen = false;
+                    }
+                    
+                    // Crear popup de click
+                    createClickPopup(event);
+                    
+                    // Reproducir sonido
+                    playClickSound();
+                    
+                    // Incrementar contador
+                    userClicks++;
+                    
+                    // Actualizar UI inmediatamente
+                    updateMinimizedLeaderboard(currentLeaderboard);
+                    
+                    // Agregar a la cola de clicks
+                    clickQueue.push({
+                        timestamp: Date.now(),
+                        userId: userId,
+                        countryCode: userCountryCode,
+                        countryName: userCountry
+                    });
+                    
+                    // Procesar cola inmediatamente
+                    if (!isSending) {
+                        processClickQueue();
+                    }
+                    
+                    // Restaurar imagen después de un breve tiempo
+                    if (imageChangeTimeout) {
+                        clearTimeout(imageChangeTimeout);
+                    }
+                    imageChangeTimeout = setTimeout(() => {
+                        catImage.src = IMAGE_OPEN;
+                        catImage.classList.remove('closed');
+                        catImage.classList.add('open');
+                        isImageOpen = true;
+                    }, 50);
                 });
-                
-                if (!isSending) {
-                    processClickQueue();
-                }
-                
-                isClicking = true;
             };
             
-            const handleClickEnd = function() {
-                if (!isClicking) return;
-                
-                isClicking = false;
-                catImage.src = IMAGE_OPEN;
-                catImage.classList.remove('closed');
-                catImage.classList.add('open');
-                
-                if (clickQueue.length > 0 && !isSending) {
-                    processClickQueue();
-                }
-            };
+            // Agregar eventos para todos los tipos de interacción
+            catContainer.addEventListener('mousedown', handleClick);
+            catContainer.addEventListener('touchstart', handleClick, { passive: false });
             
-            catContainer.addEventListener('mousedown', handleClickStart);
-            catContainer.addEventListener('mouseup', handleClickEnd);
-            catContainer.addEventListener('mouseleave', handleClickEnd);
-            
-            catContainer.addEventListener('touchstart', handleClickStart, { passive: false });
-            catContainer.addEventListener('touchend', handleClickEnd);
-            catContainer.addEventListener('touchcancel', handleClickEnd);
-            
+            // Prevenir comportamientos no deseados
             catContainer.addEventListener('contextmenu', function(e) {
                 e.preventDefault();
                 return false;
@@ -698,13 +724,15 @@
             });
         }
         
+        // Procesar cola de clicks mejorado
         async function processClickQueue() {
             if (isSending || clickQueue.length === 0) return;
             
             isSending = true;
             
-            const clicksToProcess = Math.min(clickQueue.length, 2);
-            const batchToSend = clickQueue.slice(0, clicksToProcess);
+            // Enviar todos los clicks pendientes
+            const clicksToProcess = clickQueue.length;
+            const batchToSend = [...clickQueue];
             
             try {
                 const response = await fetch(`${API_BASE_URL}/api/clicks`, {
@@ -722,8 +750,12 @@
                 if (response.ok) {
                     const data = await response.json();
                     serverConfirmedClicks = data.userClicks;
+                    
+                    // Eliminar solo los clicks procesados exitosamente
                     clickQueue = clickQueue.slice(clicksToProcess);
                     retryCount = 0;
+                    
+                    // Actualizar leaderboard
                     loadLeaderboard();
                 } else {
                     throw new Error(`HTTP ${response.status}`);
@@ -732,11 +764,13 @@
             } catch (error) {
                 retryCount++;
                 if (retryCount <= MAX_RETRIES) {
+                    // Reintentar después de un breve tiempo
                     setTimeout(() => {
                         isSending = false;
                         processClickQueue();
-                    }, 50);
+                    }, 100);
                 } else {
+                    // Después de varios intentos, continuar sin bloquear
                     isSending = false;
                 }
                 return;
@@ -744,11 +778,13 @@
             
             isSending = false;
             
+            // Si aún hay clicks en la cola, procesar inmediatamente
             if (clickQueue.length > 0) {
                 setTimeout(processClickQueue, 0);
             }
         }
         
+        // Generar ID de usuario
         function generateUserId() {
             let id = localStorage.getItem('popdak_userId');
             if (!id) {
@@ -758,6 +794,7 @@
             return id;
         }
         
+        // Cargar datos del usuario
         async function loadUserData() {
             try {
                 const response = await fetch(`${API_BASE_URL}/api/user/${userId}`);
@@ -767,9 +804,11 @@
                     serverConfirmedClicks = data.userClicks;
                 }
             } catch (error) {
+                // Silenciar errores
             }
         }
         
+        // Cargar leaderboard
         async function loadLeaderboard() {
             try {
                 const response = await fetch(`${API_BASE_URL}/api/leaderboard`);
@@ -777,19 +816,17 @@
                     const data = await response.json();
                     currentLeaderboard = data.leaderboard || [];
                     
-                    const myCountryInLeaderboard = currentLeaderboard.find(country => 
-                        country.countryCode === userCountryCode
-                    );
-                    
                     updateMinimizedLeaderboard(currentLeaderboard);
                     if (isLeaderboardExpanded) {
                         updateExpandedLeaderboard(currentLeaderboard);
                     }
                 }
             } catch (error) {
+                // Silenciar errores
             }
         }
         
+        // Actualizar leaderboard minimizado
         function updateMinimizedLeaderboard(leaderboardData) {
             if (!leaderboardData || leaderboardData.length === 0) {
                 leaderboardTop.innerHTML = '<span>No data yet</span>';
@@ -803,7 +840,8 @@
                 country.countryCode === userCountryCode
             );
             
-            const displayClicks = myCountryData ? myCountryData.totalClicks : userClicks;
+            // Usar userClicks en tiempo real para mostrar
+            const displayClicks = userClicks;
             
             const topCountryFlag = topCountry.countryCode !== 'int' ? 
                 `https://flagcdn.com/w40/${topCountry.countryCode}.png` : 
@@ -833,6 +871,7 @@
             `;
         }
         
+        // Actualizar leaderboard expandido
         function updateExpandedLeaderboard(leaderboardData) {
             if (!leaderboardData || leaderboardData.length === 0) {
                 leaderboardBody.innerHTML = '<tr><td colspan="3" style="text-align: center;">No data yet</td></tr>';
@@ -882,6 +921,7 @@
             });
         }
         
+        // Obtener medalla según ranking
         function getMedal(rank) {
             switch(rank) {
                 case 1:
@@ -907,6 +947,7 @@
             }
         }
         
+        // Alternar leaderboard expandido/minimizado
         function toggleLeaderboard() {
             isLeaderboardExpanded = !isLeaderboardExpanded;
             
@@ -920,6 +961,7 @@
             }
         }
         
+        // Crear popup de click
         function createClickPopup(event) {
             const popup = document.createElement('div');
             popup.className = 'click-popup';
@@ -954,6 +996,7 @@
             }, 800);
         }
         
+        // Enviar clicks pendientes antes de cerrar la página
         window.addEventListener('beforeunload', function() {
             if (clickQueue.length > 0 && navigator.sendBeacon) {
                 const data = JSON.stringify({
