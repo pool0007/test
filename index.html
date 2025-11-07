@@ -473,14 +473,14 @@
         </div>
     </div>
 
-            <script>
+              <script>
         // Auto-detect API URL
         const API_BASE_URL = window.location.origin;
         
         // Global variables
         let userClicks = 0;
-        let serverConfirmedClicks = 0; // Clicks confirmados por el servidor
-        let pendingClicks = 0; // Clicks pendientes de confirmar (solo interno)
+        let serverConfirmedClicks = 0;
+        let pendingClicks = 0;
         let userCountry = "Unknown";
         let userCountryCode = "unknown";
         let userId = generateUserId();
@@ -494,7 +494,7 @@
         let clickQueue = [];
         let isSending = false;
         let retryCount = 0;
-        const MAX_RETRIES = 3;
+        const MAX_RETRIES = 5; // Aumentamos reintentos
         
         // Sistema de audio
         let audioPool = [];
@@ -557,16 +557,16 @@
             preloadImages();
             
             await detectCountry();
-            await loadUserData(); // Cargar clicks existentes del usuario
+            await loadUserData();
             await loadLeaderboard();
             
             setupClickEvents();
             setupLeaderboardToggle();
             
-            // Procesar cola cada segundo
-            setInterval(processClickQueue, 1000);
-            // Actualizar leaderboard cada 3 segundos
-            setInterval(loadLeaderboard, 3000);
+            // Procesar cola más frecuentemente
+            setInterval(processClickQueue, 500);
+            // Actualizar leaderboard con los datos del usuario
+            setInterval(loadLeaderboard, 2000);
             
             activateAudioOnFirstTouch();
             
@@ -621,7 +621,7 @@
                 createClickPopup(event);
                 playClickSound();
                 
-                // CONTEO LOCAL INMEDIATO - EL USUARIO SIEMPRE VE EL NÚMERO CORRECTO
+                // CONTEO LOCAL INMEDIATO
                 userClicks++;
                 pendingClicks++;
                 
@@ -633,9 +633,14 @@
                     countryName: userCountry
                 });
                 
-                // Actualizar UI inmediatamente con el número exacto
+                // Actualizar UI inmediatamente
                 updateMinimizedLeaderboard(currentLeaderboard);
                 animateClickCounter();
+                
+                // Procesar cola inmediatamente si hay muchos clicks pendientes
+                if (clickQueue.length >= 10) {
+                    processClickQueue();
+                }
                 
                 isClicking = true;
                 if (clickTimeout) clearTimeout(clickTimeout);
@@ -645,12 +650,12 @@
                 isClicking = false;
                 changeToOpenImage();
                 
-                // Procesar cola después de dejar de hacer click
+                // Procesar cola inmediatamente al terminar de hacer click
                 clickTimeout = setTimeout(() => {
-                    if (!isClicking) {
+                    if (!isClicking && clickQueue.length > 0) {
                         processClickQueue();
                     }
-                }, 300);
+                }, 200);
             };
             
             // Eventos para desktop
@@ -686,7 +691,6 @@
             console.log(`📤 Enviando lote de ${clicksCount} clicks...`);
             
             try {
-                // Enviar todos los clicks en una sola solicitud
                 const response = await fetch(`${API_BASE_URL}/api/clicks`, {
                     method: 'POST',
                     headers: {
@@ -696,22 +700,34 @@
                         userId: userId,
                         countryCode: userCountryCode,
                         countryName: userCountry,
-                        clicks: clicksCount
+                        clicks: clicksCount,
+                        currentTotal: userClicks // Enviamos el total actual para validación
                     })
                 });
                 
                 if (response.ok) {
                     const data = await response.json();
                     
-                    // Actualizar con la respuesta del servidor
+                    // ACTUALIZACIÓN CRÍTICA: Sincronizar con el servidor
                     serverConfirmedClicks = data.userClicks;
+                    
+                    // Verificar consistencia
+                    if (serverConfirmedClicks < userClicks) {
+                        console.warn(`⚠️ Discrepancia: Local ${userClicks} vs Servidor ${serverConfirmedClicks}`);
+                        // Forzar sincronización con el servidor
+                        userClicks = serverConfirmedClicks;
+                    }
+                    
                     pendingClicks = Math.max(0, pendingClicks - clicksCount);
                     
                     // Limpiar cola procesada
-                    clickQueue = [];
+                    clickQueue = clickQueue.slice(clicksCount);
                     retryCount = 0;
                     
-                    console.log(`✅ ${clicksCount} clicks confirmados por el servidor. Total: ${serverConfirmedClicks}`);
+                    console.log(`✅ ${clicksCount} clicks confirmados. Total servidor: ${serverConfirmedClicks}`);
+                    
+                    // Recargar leaderboard con datos actualizados
+                    await loadLeaderboard();
                     
                 } else {
                     throw new Error(`HTTP ${response.status}`);
@@ -720,17 +736,17 @@
             } catch (error) {
                 console.log(`❌ Error enviando clicks: ${error.message}`);
                 
-                // Reintentar
+                // Reintentar más agresivamente
                 retryCount++;
                 if (retryCount <= MAX_RETRIES) {
-                    console.log(`🔄 Reintentando... (${retryCount}/${MAX_RETRIES})`);
+                    const delay = 500 * retryCount; // Backoff exponencial
+                    console.log(`🔄 Reintentando en ${delay}ms... (${retryCount}/${MAX_RETRIES})`);
                     setTimeout(() => {
                         isSending = false;
                         processClickQueue();
-                    }, 1000 * retryCount);
+                    }, delay);
                 } else {
-                    // Si falla después de varios intentos, mantener clicks en cola
-                    console.log('⚠️ Clicks mantenidos en cola local');
+                    console.log('⚠️ Máximo de reintentos alcanzado. Clicks en cola:', clickQueue.length);
                     isSending = false;
                 }
                 return;
@@ -738,7 +754,7 @@
             
             isSending = false;
             
-            // Procesar siguiente lote si hay más clicks
+            // Procesar siguiente lote inmediatamente si hay más
             if (clickQueue.length > 0) {
                 setTimeout(processClickQueue, 100);
             }
@@ -810,6 +826,17 @@
                 if (response.ok) {
                     const data = await response.json();
                     currentLeaderboard = data.leaderboard || [];
+                    
+                    // ACTUALIZACIÓN IMPORTANTE: Buscar nuestro país en el leaderboard
+                    const myCountryInLeaderboard = currentLeaderboard.find(country => 
+                        country.countryCode === userCountryCode
+                    );
+                    
+                    // Si nuestro país está en el leaderboard, usar esos datos
+                    if (myCountryInLeaderboard) {
+                        console.log(`🎯 Nuestro país en leaderboard: ${myCountryInLeaderboard.totalClicks} clicks`);
+                    }
+                    
                     updateMinimizedLeaderboard(currentLeaderboard);
                     if (isLeaderboardExpanded) {
                         updateExpandedLeaderboard(currentLeaderboard);
@@ -829,7 +856,14 @@
             const topCountry = leaderboardData[0];
             const medal = getMedal(1);
             
-            // MOSTRAR SOLO EL NÚMERO EXACTO - SIN INDICADORES DE PENDIENTES
+            // Buscar nuestro país en el leaderboard para mostrar datos consistentes
+            const myCountryData = leaderboardData.find(country => 
+                country.countryCode === userCountryCode
+            );
+            
+            // Si encontramos nuestro país, usar los datos del servidor
+            const displayClicks = myCountryData ? myCountryData.totalClicks : userClicks;
+            
             leaderboardTop.innerHTML = `
                 <div class="top-country">
                     <div class="medal ${medal.class}">${medal.icon}</div>
@@ -843,7 +877,7 @@
                     <img src="https://flagcdn.com/w40/${userCountryCode}.png" 
                          alt="${userCountry}" 
                          class="user-flag">
-                    <span class="user-clicks">${userClicks.toLocaleString()}</span>
+                    <span class="user-clicks">${displayClicks.toLocaleString()}</span>
                 </div>
             `;
         }
@@ -964,19 +998,6 @@
             }, 800);
         }
         
-        // Prevenir acciones no deseadas
-        document.addEventListener('touchstart', function(e) {
-            if (e.touches.length > 1) {
-                e.preventDefault();
-            }
-        }, { passive: false });
-        
-        document.addEventListener('contextmenu', function(e) {
-            if (e.target === catImage || e.target === catContainer) {
-                e.preventDefault();
-            }
-        });
-        
         // Sincronizar antes de que la página se cierre
         window.addEventListener('beforeunload', function() {
             if (clickQueue.length > 0 && navigator.sendBeacon) {
@@ -984,7 +1005,8 @@
                     userId: userId,
                     countryCode: userCountryCode,
                     countryName: userCountry,
-                    clicks: clickQueue.length
+                    clicks: clickQueue.length,
+                    currentTotal: userClicks
                 });
                 
                 navigator.sendBeacon(`${API_BASE_URL}/api/clicks`, data);
