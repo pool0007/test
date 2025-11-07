@@ -473,14 +473,14 @@
         </div>
     </div>
 
-        <script>
+            <script>
         // Auto-detect API URL
         const API_BASE_URL = window.location.origin;
         
         // Global variables
         let userClicks = 0;
         let serverConfirmedClicks = 0; // Clicks confirmados por el servidor
-        let pendingClicks = 0; // Clicks pendientes de confirmar
+        let pendingClicks = 0; // Clicks pendientes de confirmar (solo interno)
         let userCountry = "Unknown";
         let userCountryCode = "unknown";
         let userId = generateUserId();
@@ -621,7 +621,7 @@
                 createClickPopup(event);
                 playClickSound();
                 
-                // CONTEO LOCAL INMEDIATO
+                // CONTEO LOCAL INMEDIATO - EL USUARIO SIEMPRE VE EL NÚMERO CORRECTO
                 userClicks++;
                 pendingClicks++;
                 
@@ -633,7 +633,7 @@
                     countryName: userCountry
                 });
                 
-                // Actualizar UI inmediatamente
+                // Actualizar UI inmediatamente con el número exacto
                 updateMinimizedLeaderboard(currentLeaderboard);
                 animateClickCounter();
                 
@@ -681,8 +681,9 @@
             
             isSending = true;
             const batchToSend = [...clickQueue];
+            const clicksCount = batchToSend.length;
             
-            console.log(`📤 Enviando lote de ${batchToSend.length} clicks...`);
+            console.log(`📤 Enviando lote de ${clicksCount} clicks...`);
             
             try {
                 // Enviar todos los clicks en una sola solicitud
@@ -695,7 +696,7 @@
                         userId: userId,
                         countryCode: userCountryCode,
                         countryName: userCountry,
-                        clicks: batchToSend.length
+                        clicks: clicksCount
                     })
                 });
                 
@@ -703,18 +704,14 @@
                     const data = await response.json();
                     
                     // Actualizar con la respuesta del servidor
-                    userClicks = data.userClicks;
                     serverConfirmedClicks = data.userClicks;
-                    pendingClicks = 0;
+                    pendingClicks = Math.max(0, pendingClicks - clicksCount);
                     
                     // Limpiar cola procesada
                     clickQueue = [];
                     retryCount = 0;
                     
-                    console.log(`✅ Clicks confirmados: ${data.userClicks} (${batchToSend.length} nuevos)`);
-                    
-                    // Actualizar UI
-                    updateMinimizedLeaderboard(currentLeaderboard);
+                    console.log(`✅ ${clicksCount} clicks confirmados por el servidor. Total: ${serverConfirmedClicks}`);
                     
                 } else {
                     throw new Error(`HTTP ${response.status}`);
@@ -832,10 +829,7 @@
             const topCountry = leaderboardData[0];
             const medal = getMedal(1);
             
-            // Mostrar clicks locales + indicador de pendientes si hay
-            const displayClicks = userClicks.toLocaleString();
-            const pendingText = pendingClicks > 0 ? ` (+${pendingClicks})` : '';
-            
+            // MOSTRAR SOLO EL NÚMERO EXACTO - SIN INDICADORES DE PENDIENTES
             leaderboardTop.innerHTML = `
                 <div class="top-country">
                     <div class="medal ${medal.class}">${medal.icon}</div>
@@ -849,7 +843,7 @@
                     <img src="https://flagcdn.com/w40/${userCountryCode}.png" 
                          alt="${userCountry}" 
                          class="user-flag">
-                    <span class="user-clicks">${displayClicks}${pendingText}</span>
+                    <span class="user-clicks">${userClicks.toLocaleString()}</span>
                 </div>
             `;
         }
