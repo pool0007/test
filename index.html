@@ -512,7 +512,7 @@
    // En initializeAudioPool:
 function initializeAudioPool() {
     for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
-        const audio = new Audio('/sound.mp3'); // Añade /
+        const audio = new Audio('sound.mp3'); // Añade /
         audio.preload = 'auto';
         audio.volume = 0.6;
         audioPool.push(audio);
