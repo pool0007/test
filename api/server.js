@@ -120,9 +120,9 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// NUEVA RUTA MEJORADA: Procesar múltiples clicks
+// RUTA MEJORADA: Procesar múltiples clicks con validación
 app.post('/api/clicks', (req, res) => {
-    const { userId, countryCode, countryName, clicks } = req.body;
+    const { userId, countryCode, countryName, clicks, currentTotal } = req.body;
     
     if (!userId || !countryCode || !clicks || clicks < 1) {
         return res.status(400).json({ error: 'Missing required fields: userId, countryCode, and clicks' });
@@ -133,59 +133,97 @@ app.post('/api/clicks', (req, res) => {
     // Invalidar cache
     leaderboardCache = null;
     
-    // Usar transacción para atomicidad
     db.serialize(() => {
         // Iniciar transacción
         db.run('BEGIN TRANSACTION');
         
-        // Actualizar usuario con múltiples clicks
-        db.run(`INSERT OR REPLACE INTO users (userId, country, totalClicks, lastClick) 
-                VALUES (?, ?, COALESCE((SELECT totalClicks FROM users WHERE userId = ?), 0) + ?, datetime('now'))`,
-            [userId, countryName, userId, clicks], function(err) {
-                if (err) {
-                    console.error('❌ Error updating user:', err);
-                    db.run('ROLLBACK');
-                    return res.status(500).json({ error: 'Database error updating user' });
-                }
-                
-                console.log(`✅ User ${userId} updated with ${clicks} clicks`);
-            });
-        
-        // Actualizar país con múltiples clicks
-        db.run(`INSERT OR REPLACE INTO countries (countryCode, countryName, totalClicks) 
-                VALUES (?, ?, COALESCE((SELECT totalClicks FROM countries WHERE countryCode = ?), 0) + ?)`,
-            [countryCode, countryName, countryCode, clicks], function(err) {
-                if (err) {
-                    console.error('❌ Error updating country:', err);
-                    db.run('ROLLBACK');
-                    return res.status(500).json({ error: 'Database error updating country' });
-                }
-                
-                console.log(`✅ Country ${countryCode} updated with ${clicks} clicks`);
-            });
-        
-        // Confirmar transacción
-        db.run('COMMIT', (err) => {
+        // Obtener clicks actuales del usuario ANTES de actualizar
+        db.get(`SELECT totalClicks FROM users WHERE userId = ?`, [userId], (err, existingUser) => {
             if (err) {
-                console.error('❌ Transaction commit error:', err);
-                return res.status(500).json({ error: 'Transaction failed' });
+                console.error('❌ Error getting user data:', err);
+                db.run('ROLLBACK');
+                return res.status(500).json({ error: 'Database error' });
             }
             
-            // Obtener clicks actualizados del usuario
-            db.get(`SELECT totalClicks FROM users WHERE userId = ?`, [userId], (err, user) => {
+            const currentUserClicks = existingUser?.totalClicks || 0;
+            const newUserClicks = currentUserClicks + clicks;
+            
+            // Validación: Prevenir que los clicks disminuyan
+            if (currentTotal && newUserClicks < currentTotal) {
+                console.warn(`⚠️ Possible data loss: new ${newUserClicks} < current ${currentTotal}`);
+                // Usar el mayor valor entre el cálculo y el currentTotal
+                const finalUserClicks = Math.max(newUserClicks, currentTotal);
+                
+                // Actualizar usuario con el valor corregido
+                db.run(`INSERT OR REPLACE INTO users (userId, country, totalClicks, lastClick) 
+                        VALUES (?, ?, ?, datetime('now'))`,
+                    [userId, countryName, finalUserClicks], function(err) {
+                        if (err) {
+                            console.error('❌ Error updating user:', err);
+                            db.run('ROLLBACK');
+                            return res.status(500).json({ error: 'Database error updating user' });
+                        }
+                    });
+            } else {
+                // Actualizar usuario normalmente
+                db.run(`INSERT OR REPLACE INTO users (userId, country, totalClicks, lastClick) 
+                        VALUES (?, ?, ?, datetime('now'))`,
+                    [userId, countryName, newUserClicks], function(err) {
+                        if (err) {
+                            console.error('❌ Error updating user:', err);
+                            db.run('ROLLBACK');
+                            return res.status(500).json({ error: 'Database error updating user' });
+                        }
+                    });
+            }
+            
+            // Obtener clicks actuales del país ANTES de actualizar
+            db.get(`SELECT totalClicks FROM countries WHERE countryCode = ?`, [countryCode], (err, existingCountry) => {
                 if (err) {
-                    console.error('❌ Error getting user clicks:', err);
-                    return res.status(500).json({ error: 'Database error fetching user data' });
+                    console.error('❌ Error getting country data:', err);
+                    db.run('ROLLBACK');
+                    return res.status(500).json({ error: 'Database error' });
                 }
                 
-                const userClicks = user?.totalClicks || 0;
+                const currentCountryClicks = existingCountry?.totalClicks || 0;
+                const newCountryClicks = currentCountryClicks + clicks;
                 
-                console.log(`✅ Successfully processed ${clicks} clicks for user ${userId}. Total: ${userClicks}`);
+                // Actualizar país
+                db.run(`INSERT OR REPLACE INTO countries (countryCode, countryName, totalClicks) 
+                        VALUES (?, ?, ?)`,
+                    [countryCode, countryName, newCountryClicks], function(err) {
+                        if (err) {
+                            console.error('❌ Error updating country:', err);
+                            db.run('ROLLBACK');
+                            return res.status(500).json({ error: 'Database error updating country' });
+                        }
+                    });
                 
-                res.json({
-                    userClicks: userClicks,
-                    message: `Successfully processed ${clicks} clicks`,
-                    totalClicks: userClicks
+                // Confirmar transacción
+                db.run('COMMIT', (err) => {
+                    if (err) {
+                        console.error('❌ Transaction commit error:', err);
+                        return res.status(500).json({ error: 'Transaction failed' });
+                    }
+                    
+                    // Obtener el valor final después de todas las correcciones
+                    db.get(`SELECT totalClicks FROM users WHERE userId = ?`, [userId], (err, finalUser) => {
+                        if (err) {
+                            console.error('❌ Error getting final user clicks:', err);
+                            return res.status(500).json({ error: 'Database error' });
+                        }
+                        
+                        const finalUserClicks = finalUser?.totalClicks || newUserClicks;
+                        
+                        console.log(`✅ Successfully processed ${clicks} clicks for user ${userId}. User: ${currentUserClicks} → ${finalUserClicks}, Country: ${currentCountryClicks} → ${newCountryClicks}`);
+                        
+                        res.json({
+                            userClicks: finalUserClicks,
+                            message: `Successfully processed ${clicks} clicks`,
+                            previousUserClicks: currentUserClicks,
+                            previousCountryClicks: currentCountryClicks
+                        });
+                    });
                 });
             });
         });
@@ -439,7 +477,7 @@ if (require.main === module) {
         console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
         console.log(`✅ API endpoints available:`);
         console.log(`   GET  /api/health`);
-        console.log(`   POST /api/clicks    (BATCH - RECOMENDADO)`);
+        console.log(`   POST /api/clicks    (BATCH - MEJORADA)`);
         console.log(`   POST /api/click     (individual)`);
         console.log(`   GET  /api/leaderboard`);
         console.log(`   GET  /api/user/:userId`);
