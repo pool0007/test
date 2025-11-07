@@ -509,15 +509,15 @@
         const IMAGE_OPEN = 'image1.png';
         const IMAGE_CLOSED = 'image2.png';
         
-        // Inicializar el pool de audio
-        function initializeAudioPool() {
-            for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
-                const audio = new Audio('/sound.mp3');
-                audio.preload = 'auto';
-                audio.volume = 0.6;
-                audioPool.push(audio);
-            }
-        }
+   // En initializeAudioPool:
+function initializeAudioPool() {
+    for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
+        const audio = new Audio('/sound.mp3'); // Añade /
+        audio.preload = 'auto';
+        audio.volume = 0.6;
+        audioPool.push(audio);
+    }
+}
         
         // Función para reproducir sonido
         function playClickSound() {
