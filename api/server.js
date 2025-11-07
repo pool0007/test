@@ -120,7 +120,79 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Rutas de la API OPTIMIZADAS
+// NUEVA RUTA MEJORADA: Procesar múltiples clicks
+app.post('/api/clicks', (req, res) => {
+    const { userId, countryCode, countryName, clicks } = req.body;
+    
+    if (!userId || !countryCode || !clicks || clicks < 1) {
+        return res.status(400).json({ error: 'Missing required fields: userId, countryCode, and clicks' });
+    }
+    
+    console.log(`🖱️ Processing ${clicks} clicks from user: ${userId}, country: ${countryCode}`);
+    
+    // Invalidar cache
+    leaderboardCache = null;
+    
+    // Usar transacción para atomicidad
+    db.serialize(() => {
+        // Iniciar transacción
+        db.run('BEGIN TRANSACTION');
+        
+        // Actualizar usuario con múltiples clicks
+        db.run(`INSERT OR REPLACE INTO users (userId, country, totalClicks, lastClick) 
+                VALUES (?, ?, COALESCE((SELECT totalClicks FROM users WHERE userId = ?), 0) + ?, datetime('now'))`,
+            [userId, countryName, userId, clicks], function(err) {
+                if (err) {
+                    console.error('❌ Error updating user:', err);
+                    db.run('ROLLBACK');
+                    return res.status(500).json({ error: 'Database error updating user' });
+                }
+                
+                console.log(`✅ User ${userId} updated with ${clicks} clicks`);
+            });
+        
+        // Actualizar país con múltiples clicks
+        db.run(`INSERT OR REPLACE INTO countries (countryCode, countryName, totalClicks) 
+                VALUES (?, ?, COALESCE((SELECT totalClicks FROM countries WHERE countryCode = ?), 0) + ?)`,
+            [countryCode, countryName, countryCode, clicks], function(err) {
+                if (err) {
+                    console.error('❌ Error updating country:', err);
+                    db.run('ROLLBACK');
+                    return res.status(500).json({ error: 'Database error updating country' });
+                }
+                
+                console.log(`✅ Country ${countryCode} updated with ${clicks} clicks`);
+            });
+        
+        // Confirmar transacción
+        db.run('COMMIT', (err) => {
+            if (err) {
+                console.error('❌ Transaction commit error:', err);
+                return res.status(500).json({ error: 'Transaction failed' });
+            }
+            
+            // Obtener clicks actualizados del usuario
+            db.get(`SELECT totalClicks FROM users WHERE userId = ?`, [userId], (err, user) => {
+                if (err) {
+                    console.error('❌ Error getting user clicks:', err);
+                    return res.status(500).json({ error: 'Database error fetching user data' });
+                }
+                
+                const userClicks = user?.totalClicks || 0;
+                
+                console.log(`✅ Successfully processed ${clicks} clicks for user ${userId}. Total: ${userClicks}`);
+                
+                res.json({
+                    userClicks: userClicks,
+                    message: `Successfully processed ${clicks} clicks`,
+                    totalClicks: userClicks
+                });
+            });
+        });
+    });
+});
+
+// Ruta original de click individual (para compatibilidad)
 app.post('/api/click', (req, res) => {
     const { userId, countryCode, countryName } = req.body;
     
@@ -128,7 +200,7 @@ app.post('/api/click', (req, res) => {
         return res.status(400).json({ error: 'Missing required fields: userId and countryCode' });
     }
     
-    console.log(`🖱️ Click received from user: ${userId}, country: ${countryCode}`);
+    console.log(`🖱️ Single click from user: ${userId}, country: ${countryCode}`);
     
     // Invalidar cache
     leaderboardCache = null;
@@ -175,7 +247,7 @@ app.post('/api/click', (req, res) => {
                     leaderboard: leaderboardCache
                 };
                 
-                console.log(`✅ Click processed - User: ${userClicks} clicks, Total: ${response.totalClicks} clicks`);
+                console.log(`✅ Single click processed - User: ${userClicks} clicks, Total: ${response.totalClicks} clicks`);
                 res.json(response);
             });
         });
@@ -231,7 +303,43 @@ app.get('/api/user/:userId', (req, res) => {
             return res.status(500).json({ error: err.message });
         }
         
-        res.json({ userClicks: user?.totalClicks || 0 });
+        const userClicks = user?.totalClicks || 0;
+        console.log(`📊 User data requested: ${userId} - ${userClicks} clicks`);
+        
+        res.json({ userClicks: userClicks });
+    });
+});
+
+// Ruta para obtener estadísticas completas
+app.get('/api/stats', (req, res) => {
+    db.serialize(() => {
+        db.get(`SELECT COUNT(*) as totalUsers FROM users`, (err, users) => {
+            if (err) {
+                console.error('Error getting user count:', err);
+                return res.status(500).json({ error: err.message });
+            }
+            
+            db.get(`SELECT COUNT(*) as totalCountries FROM countries`, (err, countries) => {
+                if (err) {
+                    console.error('Error getting country count:', err);
+                    return res.status(500).json({ error: err.message });
+                }
+                
+                db.get(`SELECT SUM(totalClicks) as totalClicks FROM countries`, (err, clicks) => {
+                    if (err) {
+                        console.error('Error getting total clicks:', err);
+                        return res.status(500).json({ error: err.message });
+                    }
+                    
+                    res.json({
+                        totalUsers: users?.totalUsers || 0,
+                        totalCountries: countries?.totalCountries || 0,
+                        totalClicks: clicks?.totalClicks || 0,
+                        timestamp: new Date().toISOString()
+                    });
+                });
+            });
+        });
     });
 });
 
@@ -251,14 +359,36 @@ app.get('/api/debug/files', (req, res) => {
         const filePath = path.join(__dirname, '..', file);
         fileStatus[file] = {
             exists: fs.existsSync(filePath),
-            path: filePath
+            path: filePath,
+            size: fs.existsSync(filePath) ? fs.statSync(filePath).size : 0
         };
     });
     
     res.json({
         currentDir: __dirname,
         rootDir: path.join(__dirname, '..'),
-        files: fileStatus
+        files: fileStatus,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Ruta para resetear datos (solo para desarrollo)
+app.post('/api/reset', (req, res) => {
+    if (process.env.NODE_ENV !== 'development') {
+        return res.status(403).json({ error: 'Reset only allowed in development' });
+    }
+    
+    db.serialize(() => {
+        db.run('DELETE FROM users');
+        db.run('DELETE FROM countries');
+        
+        initializeDatabase();
+        
+        // Invalidar cache
+        leaderboardCache = null;
+        totalClicksCache = 0;
+        
+        res.json({ message: 'Database reset successfully' });
     });
 });
 
@@ -291,7 +421,10 @@ app.get('*', (req, res) => {
 // Manejo de errores global
 app.use((err, req, res, next) => {
     console.error('🚨 Unhandled error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+        error: 'Internal server error',
+        message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    });
 });
 
 // Exportar para Vercel
@@ -303,5 +436,14 @@ if (require.main === module) {
         console.log(`🚀 Pop-Dak Server running on port ${PORT}`);
         console.log(`📁 Current directory: ${__dirname}`);
         console.log(`📁 Root directory: ${path.join(__dirname, '..')}`);
+        console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`✅ API endpoints available:`);
+        console.log(`   GET  /api/health`);
+        console.log(`   POST /api/clicks    (BATCH - RECOMENDADO)`);
+        console.log(`   POST /api/click     (individual)`);
+        console.log(`   GET  /api/leaderboard`);
+        console.log(`   GET  /api/user/:userId`);
+        console.log(`   GET  /api/stats`);
+        console.log(`   GET  /api/debug/files`);
     });
 }
